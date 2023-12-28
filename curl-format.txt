@@ -1,0 +1,4 @@
+  Total Time:  %{time_total}s |
+  Time to Connect:  %{time_connect}s |
+  Time To Transfer:  %{time_pretransfer}s |
+  Time To First Byte:  %{time_starttransfer}s\n
