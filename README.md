@@ -4,8 +4,16 @@
 上記ワークショップの内、Global Acceleratorのもののみ実施している。
 
 ## アーキテクチャ
-ALB+Lambdaによるバックエンドがあり、その前面に Global Acceleratorを配置する構成
+ALB+Lambdaによるバックエンドがあり、その前面に Global Acceleratorを配置する構成。
+
+パフォーマンステストを行うために、ALBにも直接アクセス可能としている点に注意。
 ![](./architecture.drawio.svg)
+
+オリジンを隠匿したい場合は、以下のようにプライベートサブネットに配置する。
+
+その場合でも、Global AcceleratorからアクセスするためにInternet Gatewayは必須である点に注意。
+
+![](./architecture_private.drawio.svg)
 
 ## デプロイ方法
 `cdk deploy`するのみ

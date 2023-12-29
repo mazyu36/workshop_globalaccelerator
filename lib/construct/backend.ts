@@ -31,6 +31,35 @@ export class BackendConstruct extends Construct {
     }
     )
 
+    /*
+    // オリジンを隠匿したい場合はプライベートサブネットのみ作成
+    const vpc = new ec2.Vpc(this, 'Vpc', {
+      natGateways: 0,
+      maxAzs: 2,
+      ipAddresses: ec2.IpAddresses.cidr('10.135.0.0/16'),
+      subnetConfiguration: [
+        {
+          cidrMask: 24,
+          name: 'PrivateSubnet',
+          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+        }
+      ],
+      enableDnsHostnames: true,
+      enableDnsSupport: true
+    }
+    )
+    // Global AcceleratorはIGWが必須のため作成
+    const cfnInternetGateway = new ec2.CfnInternetGateway(scope, 'InternetGateway', {
+    })
+
+    // IGWをVPCにアタッチ
+    new ec2.CfnVPCGatewayAttachment(scope, 'IGW2VPC', {
+      vpcId: vpc.vpcId,
+      internetGatewayId: cfnInternetGateway.ref
+    })
+
+    */
+
     // ------ Lambda -------
     const lambdaFunction = new lambda.Function(this, 'LambdaFunction', {
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -45,9 +74,19 @@ export class BackendConstruct extends Construct {
       vpc: vpc,
       vpcSubnets: vpc.selectSubnets({ subnetType: ec2.SubnetType.PUBLIC }),
       internetFacing: true,
-
     })
     this.alb = alb
+
+    /*
+    //オリジンを隠匿したい場合は、ALBをプライベートサブネットに配置し、internalにする。
+    // ------ ALB -------
+    const alb = new elbv2.ApplicationLoadBalancer(this, 'ApplicationLoadBalancer', {
+      vpc: vpc,
+      vpcSubnets: vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }),
+      internetFacing: false,
+    })
+    this.alb = alb
+    */
 
     alb.connections.allowFromAnyIpv4(ec2.Port.tcp(443), 'Enable HTTPS access on the Application Load Balancer')
     alb.connections.allowFromAnyIpv4(ec2.Port.tcp(80), 'Enable HTTP access on the Application Load Balancer')
