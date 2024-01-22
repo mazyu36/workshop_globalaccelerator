@@ -14,93 +14,76 @@ export class BackendConstruct extends Construct {
   constructor(scope: Construct, id: string, props: BackendConstructProps) {
     super(scope, id);
 
+
     // ------ VPC -------
     const vpc = new ec2.Vpc(this, 'Vpc', {
-      natGateways: 0,
+      natGateways: 1,
       maxAzs: 2,
-      ipAddresses: ec2.IpAddresses.cidr('10.135.0.0/16'),
       subnetConfiguration: [
         {
-          cidrMask: 24,
+          // cidrMask: 24,
           name: 'PublicSubnet',
           subnetType: ec2.SubnetType.PUBLIC,
-        }
-      ],
-      enableDnsHostnames: true,
-      enableDnsSupport: true
-    }
-    )
-
-    /*
-    // オリジンを隠匿したい場合はプライベートサブネットのみ作成
-    const vpc = new ec2.Vpc(this, 'Vpc', {
-      natGateways: 0,
-      maxAzs: 2,
-      ipAddresses: ec2.IpAddresses.cidr('10.135.0.0/16'),
-      subnetConfiguration: [
+        },
         {
-          cidrMask: 24,
+          // cidrMask: 24,
           name: 'PrivateSubnet',
-          subnetType: ec2.SubnetType.PRIVATE_ISOLATED,
+          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
         }
       ],
+      ipProtocol: ec2.IpProtocol.DUAL_STACK,  // Dual Stack
       enableDnsHostnames: true,
       enableDnsSupport: true
     }
     )
-    // Global AcceleratorはIGWが必須のため作成
-    const cfnInternetGateway = new ec2.CfnInternetGateway(scope, 'InternetGateway', {
-    })
-
-    // IGWをVPCにアタッチ
-    new ec2.CfnVPCGatewayAttachment(scope, 'IGW2VPC', {
-      vpcId: vpc.vpcId,
-      internetGatewayId: cfnInternetGateway.ref
-    })
-
-    */
-
-    // ------ Lambda -------
-    const lambdaFunction = new lambda.Function(this, 'LambdaFunction', {
-      runtime: lambda.Runtime.PYTHON_3_12,
-      description: 'This Lambda function simply returns the AWS region and its name.',
-      handler: 'index.lambda_handler',
-      code: lambda.Code.fromAsset('./lib/lambda/')
-    })
-
 
     // ------ ALB -------
     const alb = new elbv2.ApplicationLoadBalancer(this, 'ApplicationLoadBalancer', {
       vpc: vpc,
-      vpcSubnets: vpc.selectSubnets({ subnetType: ec2.SubnetType.PUBLIC }),
-      internetFacing: true,
-    })
-    this.alb = alb
-
-    /*
-    //オリジンを隠匿したい場合は、ALBをプライベートサブネットに配置し、internalにする。
-    // ------ ALB -------
-    const alb = new elbv2.ApplicationLoadBalancer(this, 'ApplicationLoadBalancer', {
-      vpc: vpc,
-      vpcSubnets: vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_ISOLATED }),
+      vpcSubnets: vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }),
       internetFacing: false,
+      ipAddressType: elbv2.IpAddressType.DUAL_STACK  // Dual Stack
     })
     this.alb = alb
-    */
+
 
     alb.connections.allowFromAnyIpv4(ec2.Port.tcp(443), 'Enable HTTPS access on the Application Load Balancer')
     alb.connections.allowFromAnyIpv4(ec2.Port.tcp(80), 'Enable HTTP access on the Application Load Balancer')
 
 
-    const targetGroup = new elbv2.ApplicationTargetGroup(this, 'LambdaTargetGroup', {
+    const userData = ec2.UserData.forLinux({ shebang: '#!/bin/bash' })
+    userData.addCommands(
+      'yum update -y',
+      'yum install -y httpd',
+      'systemctl start httpd',
+      'echo "Hello World" >> /var/www/html/index.html'
+    )
+
+    // EC2インスタンスを作成
+    const ec2Instance = new ec2.Instance(this, 'TargetInstance', {
+      vpc: vpc,
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO),
+      machineImage: new ec2.AmazonLinuxImage({
+        generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2,
+        cpuType: ec2.AmazonLinuxCpuType.X86_64
+      }),
+      userData: userData,
+      vpcSubnets: vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }),
+      ssmSessionPermissions: true
+    });
+
+    const targetGroup = new elbv2.ApplicationTargetGroup(this, 'TargetGroup', {
       healthCheck: {
         interval: cdk.Duration.seconds(35),
         timeout: cdk.Duration.seconds(30),
         healthyThresholdCount: 3,
         unhealthyThresholdCount: 5
       },
-      targetType: elbv2.TargetType.LAMBDA,
-      targets: [new targets.LambdaTarget(lambdaFunction)]
+      targetType: elbv2.TargetType.INSTANCE,
+      targets: [new targets.InstanceTarget(ec2Instance)],
+      vpc: vpc,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      port: 80
     })
 
     new elbv2.ApplicationListener(this, 'Listener', {
@@ -110,11 +93,17 @@ export class BackendConstruct extends Construct {
       defaultAction: elbv2.ListenerAction.forward([targetGroup])
     })
 
+    ec2Instance.connections.allowFrom(alb, ec2.Port.tcp(80))
 
-
-
-
-
+    vpc.addInterfaceEndpoint("SSMEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.SSM,
+    });
+    vpc.addInterfaceEndpoint("SSMMessagesEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.SSM_MESSAGES,
+    });
+    vpc.addInterfaceEndpoint("EC2MessagesEndpoint", {
+      service: ec2.InterfaceVpcEndpointAwsService.EC2_MESSAGES,
+    });
 
   }
 }

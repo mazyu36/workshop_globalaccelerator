@@ -14,7 +14,7 @@ export class EdgeConstruct extends Construct {
 
     // アクセラレータを作成
     const accelerator = new globalaccelerator.Accelerator(this, 'Accelerator', {
-      ipAddressType: globalaccelerator.IpAddressType.IPV4
+      ipAddressType: globalaccelerator.IpAddressType.DUAL_STACK  // Dual Stack
     })
 
     // リスナーを作成
